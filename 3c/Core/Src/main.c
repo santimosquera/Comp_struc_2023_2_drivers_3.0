@@ -252,6 +252,7 @@ uint8_t keypad_handler(uint16_t column_to_evaluate)
 			break;
 		}
 
+
 		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
 		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
 		HAL_Delay(2); // wait for voltage to establish
