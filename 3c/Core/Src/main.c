@@ -21,8 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "ring_buffer.h"
 #include <stdio.h>
+
+#include "ring_buffer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,10 +45,11 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint8_t rx_buffer[16];
 ring_buffer_t ring_buffer_uart_rx;
-
+uint8_t rx_buffer[16];
 uint8_t rx_data;
+
+uint16_t key_event = 0xFF;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -60,9 +62,222 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int _write(int file, char *ptr, int len){
-	HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-	return len;
+
+int _write(int file, char *ptr, int len)
+{
+  HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+  return len;
+}
+/**
+  * @brief  Rx Transfer completed callback.
+  * @param  huart UART handle.
+  * @retval None
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if (ring_buffer_put(&ring_buffer_uart_rx, rx_data) == 0) {
+		printf("Rx buffer is full\r\n");
+	}
+
+	HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+}
+
+/**
+  * @brief  EXTI line detection callback.
+  * @param  GPIO_Pin Specifies the port pin connected
+  *         to corresponding EXTI line.
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	key_event = GPIO_Pin;
+}
+
+/**
+ * @brief This functions initialize the functionality of the keypad
+ */
+void keypad_init(void)
+{
+	/* Set the rows high to be detected in the columns by rising interrupt */
+	ROW_1_GPIO_Port->BSRR = ROW_1_Pin;
+	ROW_2_GPIO_Port->BSRR = ROW_2_Pin;
+	ROW_3_GPIO_Port->BSRR = ROW_3_Pin;
+	ROW_4_GPIO_Port->BSRR = ROW_4_Pin;
+}
+
+/**
+ * @brief  This function debounces and identify keypad events.
+ * @param  column_to_evaluate: the column where the event happened.
+ * @retval 0xFF -> invalid key. [0x00 - 0x0F] -> valid key.
+ */
+uint8_t keypad_handler(uint16_t column_to_evaluate)
+{
+	uint8_t key_pressed = 0xFF; // Value to return
+
+	/*** Debounce the key press (remove noise in the key) ***/
+#define KEY_DEBOUNCE_MS 300 /*!> Minimum time required for since last press */
+	static uint32_t last_pressed_tick = 0;
+	if (HAL_GetTick() <= (last_pressed_tick + KEY_DEBOUNCE_MS)) {
+		// less than KEY_DEBOUNCE_MS since last press. Probably noise
+		return key_pressed; // return 0xFF
+	}
+	last_pressed_tick = HAL_GetTick();
+
+	/*** Check in which column the event happened ***/
+	switch (column_to_evaluate) {
+	case COLUMN_1_Pin:
+		ROW_1_GPIO_Port->BSRR = ROW_1_Pin; // turn on row 1
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin;  // turn off row 2
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;  // turn off row 3
+		ROW_4_GPIO_Port->BRR = ROW_4_Pin;  // turn off row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_1_GPIO_Port->IDR & COLUMN_1_Pin) {
+			key_pressed = 0x01; // if column 1 is still high -> column 1 + row 1 = key 1
+			break;
+		}
+
+		ROW_1_GPIO_Port->BRR = ROW_1_Pin; 	// turn off row 1
+		ROW_2_GPIO_Port->BSRR = ROW_2_Pin; 	// turn on row 2
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_1_GPIO_Port->IDR & COLUMN_1_Pin) {
+			key_pressed = 0x04; // if column 1 is still high -> column 1 + row 2 = key 4
+			break;
+		}
+
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
+		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_1_GPIO_Port->IDR & COLUMN_1_Pin) {
+			key_pressed = 0x07; // if column 1 is still high -> column 1 + row 3 = key 7
+			break;
+		}
+
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;	// turn off row 3
+		ROW_4_GPIO_Port->BSRR = ROW_4_Pin; 	// turn on row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_1_GPIO_Port->IDR & COLUMN_1_Pin) {
+			key_pressed = 0x0E; // if column 1 is still high -> column 1 + row 4 = key *
+			break;
+		}
+	  break;
+
+	case COLUMN_2_Pin:
+		ROW_1_GPIO_Port->BSRR = ROW_1_Pin; // turn on row 1
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin;  // turn off row 2
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;  // turn off row 3
+		ROW_4_GPIO_Port->BRR = ROW_4_Pin;  // turn off row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_2_GPIO_Port->IDR & COLUMN_2_Pin) {
+			key_pressed = 0x02; // if column 1 is still high -> column 1 + row 1 = key 1
+			break;
+		}
+
+		ROW_1_GPIO_Port->BRR = ROW_1_Pin; 	// turn off row 1
+		ROW_2_GPIO_Port->BSRR = ROW_2_Pin; 	// turn on row 2
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_2_GPIO_Port->IDR & COLUMN_2_Pin) {
+			key_pressed = 0x05; // if column 1 is still high -> column 1 + row 2 = key 4
+			break;
+		}
+
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
+		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_2_GPIO_Port->IDR & COLUMN_2_Pin) {
+			key_pressed = 0x08; // if column 1 is still high -> column 1 + row 3 = key 7
+			break;
+		}
+
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;	// turn off row 3
+		ROW_4_GPIO_Port->BSRR = ROW_4_Pin; 	// turn on row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_2_GPIO_Port->IDR & COLUMN_2_Pin) {
+			key_pressed = 0x00; // if column 1 is still high -> column 1 + row 4 = key *
+			break;
+		}
+	  break;
+
+	case COLUMN_3_Pin:
+		ROW_1_GPIO_Port->BSRR = ROW_1_Pin; // turn on row 1
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin;  // turn off row 2
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;  // turn off row 3
+		ROW_4_GPIO_Port->BRR = ROW_4_Pin;  // turn off row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_3_GPIO_Port->IDR & COLUMN_3_Pin) {
+			key_pressed = 0x03; // if column 1 is still high -> column 1 + row 1 = key 1
+			break;
+		}
+
+		ROW_1_GPIO_Port->BRR = ROW_1_Pin; 	// turn off row 1
+		ROW_2_GPIO_Port->BSRR = ROW_2_Pin; 	// turn on row 2
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_3_GPIO_Port->IDR & COLUMN_3_Pin) {
+			key_pressed = 0x06; // if column 1 is still high -> column 1 + row 2 = key 4
+			break;
+		}
+
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
+		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_3_GPIO_Port->IDR & COLUMN_3_Pin) {
+			key_pressed = 0x09; // if column 1 is still high -> column 1 + row 3 = key 7
+			break;
+		}
+
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;	// turn off row 3
+		ROW_4_GPIO_Port->BSRR = ROW_4_Pin; 	// turn on row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_3_GPIO_Port->IDR & COLUMN_3_Pin) {
+			key_pressed = 0x0F; // if column 1 is still high -> column 1 + row 4 = key *
+			break;
+		}
+	  break;
+
+	case COLUMN_4_Pin:
+		ROW_1_GPIO_Port->BSRR = ROW_1_Pin; // turn on row 1
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin;  // turn off row 2
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;  // turn off row 3
+		ROW_4_GPIO_Port->BRR = ROW_4_Pin;  // turn off row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_4_GPIO_Port->IDR & COLUMN_4_Pin) {
+			key_pressed = 0x0A; // if column 1 is still high -> column 1 + row 1 = key 1
+			break;
+		}
+
+		ROW_1_GPIO_Port->BRR = ROW_1_Pin; 	// turn off row 1
+		ROW_2_GPIO_Port->BSRR = ROW_2_Pin; 	// turn on row 2
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_4_GPIO_Port->IDR & COLUMN_4_Pin) {
+			key_pressed = 0x0B; // if column 1 is still high -> column 1 + row 2 = key 4
+			break;
+		}
+
+		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
+		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_4_GPIO_Port->IDR & COLUMN_4_Pin) {
+			key_pressed = 0x0C; // if column 1 is still high -> column 1 + row 3 = key 7
+			break;
+		}
+
+		ROW_3_GPIO_Port->BRR = ROW_3_Pin;	// turn off row 3
+		ROW_4_GPIO_Port->BSRR = ROW_4_Pin; 	// turn on row 4
+		HAL_Delay(2); // wait for voltage to establish
+		if (COLUMN_4_GPIO_Port->IDR & COLUMN_4_Pin) {
+			key_pressed = 0x0D; // if column 1 is still high -> column 1 + row 4 = key *
+			break;
+		}
+	  break;
+	/*!\ TODO: Implement other column cases here */
+
+	default:
+		/* This should not be reached */
+		printf("Unknown column: %x\r\n", column_to_evaluate);
+	  break;
+	}
+
+	keypad_init(); // set the columns high again
+	return key_pressed; // invalid: 0xFF, valid:[0x00-0x0F]
 }
 /* USER CODE END 0 */
 
@@ -96,20 +311,24 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-ring_buffer_init(&ring_buffer_uart_rx,rx_buffer,16);
+  ring_buffer_init(&ring_buffer_uart_rx, rx_buffer, 16);
 
-HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+  HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+
+  keypad_init(); // Initialize the keypad functionality
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  uint8_t data;
-	  while(ring_buffer_get(&ring_buffer_uart_rx, &data)!= 0){
-		  printf("Rec: %d\r\n", data);
+	  if (key_event != 0xFF) { // check if there is a event from the EXTi callback
+		  uint16_t key_pressed = keypad_handler(key_event); // call the keypad handler
+		  if (key_pressed != 0xFF) {
+			  printf("Key pressed: %x\r\n", key_pressed); // print the key pressed
+		  }
+		  key_event = 0xFF; // clean the event
 	  }
-  	  HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -219,7 +438,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|ROW_1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, ROW_2_Pin|ROW_4_Pin|ROW_3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -227,12 +449,44 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
+  /*Configure GPIO pins : LD2_Pin ROW_1_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|ROW_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : COLUMN_1_Pin */
+  GPIO_InitStruct.Pin = COLUMN_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(COLUMN_1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : COLUMN_4_Pin */
+  GPIO_InitStruct.Pin = COLUMN_4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(COLUMN_4_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : COLUMN_2_Pin COLUMN_3_Pin */
+  GPIO_InitStruct.Pin = COLUMN_2_Pin|COLUMN_3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ROW_2_Pin ROW_4_Pin ROW_3_Pin */
+  GPIO_InitStruct.Pin = ROW_2_Pin|ROW_4_Pin|ROW_3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
