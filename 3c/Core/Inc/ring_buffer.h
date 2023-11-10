@@ -20,6 +20,7 @@ typedef struct {
 
 } ring_buffer_t;
 
+void ssd1306_Init(void);
 
 void ring_buffer_init(ring_buffer_t *ring_buffer, uint8_t *buffer, uint16_t capacity);
 

@@ -24,6 +24,10 @@
 #include <stdio.h>
 
 #include "ring_buffer.h"
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,13 +46,17 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 ring_buffer_t ring_buffer_uart_rx;
 uint8_t rx_buffer[16];
 uint8_t rx_data;
-
+ring_buffer_t ring_buffer_keypad;
+uint8_t keypad_data[5];
+uint8_t birth_year [5] = "2002";
 uint16_t key_event = 0xFF;
 /* USER CODE END PV */
 
@@ -56,6 +64,7 @@ uint16_t key_event = 0xFF;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -93,6 +102,30 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	key_event = GPIO_Pin;
 }
 
+#include <stdio.h>  // Se asume que se incluye la librería necesaria para printf
+
+void validate_birth_year(void) {
+    uint8_t temp_buffer[5];
+    for (uint8_t idx = 0; idx < 5; idx++) {
+        ring_buffer_get(&ring_buffer_keypad, &temp_buffer[idx]);
+    }
+    if (memcmp(birth_year, temp_buffer, 5) == 0) {
+        printf("Success\r\n");
+    } else {
+        printf("Fail\r\n");  // Corregido de 'print' a 'printf'
+    }
+
+}
+void ring_buffer_init(ring_buffer_t *ring_buffer, uint8_t *buffer, uint16_t capacity);
+
+void process_key_press (uint8_t key_pressed){
+	ring_buffer_put (&ring_buffer_keypad, key_pressed);
+	if (key_pressed == "*"){
+		ring_buffer_reset(&ring_buffer_keypad);
+	}else if (ring_buffer_is_full(&ring_buffer_keypad)!=0){
+		validate_birth_year();
+	}
+}
 /**
  * @brief This functions initialize the functionality of the keypad
  */
@@ -252,7 +285,6 @@ uint8_t keypad_handler(uint16_t column_to_evaluate)
 			break;
 		}
 
-
 		ROW_2_GPIO_Port->BRR = ROW_2_Pin; 	// turn off row 2
 		ROW_3_GPIO_Port->BSRR = ROW_3_Pin; 	// turn on row 3
 		HAL_Delay(2); // wait for voltage to establish
@@ -311,12 +343,20 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
+
   /* USER CODE BEGIN 2 */
+  ring_buffer_init(&ring_buffer_keypad, keypad_data, 5);
   ring_buffer_init(&ring_buffer_uart_rx, rx_buffer, 16);
 
   HAL_UART_Receive_IT(&huart2, &rx_data, 1);
 
   keypad_init(); // Initialize the keypad functionality
+  ssd1306_Init();
+  ssd1306_Fill(Black);
+  ssd1306_SetCursor(20, 20);
+  ssd1306_WriteString("Hello World!", Font_7x10, White);
+  ssd1306_UpdateScreen();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -325,8 +365,11 @@ int main(void)
   {
 	  if (key_event != 0xFF) { // check if there is a event from the EXTi callback
 		  uint16_t key_pressed = keypad_handler(key_event); // call the keypad handler
+
 		  if (key_pressed != 0xFF) {
-			  printf("Key pressed: %x\r\n", key_pressed); // print the key pressed
+			                              // print the key pressed
+			  process_key_press(key_pressed);
+
 		  }
 		  key_event = 0xFF; // clean the event
 	  }
@@ -384,6 +427,54 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x10909CEC;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
